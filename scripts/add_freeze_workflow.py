@@ -296,6 +296,7 @@ def main():
     group.add_argument("--bulk", action="store_true", help="Process all eligible repos")
     group.add_argument("--repos", metavar="R1,R2,...", help="Comma-separated list of repos")
     parser.add_argument("--dry-run", action="store_true", help="Don't make any API calls")
+    parser.add_argument("--yes", "-y", action="store_true", help="Auto-confirm in non-interactive mode")
 
     args = parser.parse_args()
 
@@ -319,10 +320,18 @@ def main():
 
     print(f"\nWill process {len(targets)} repo(s).")
     if not args.dry_run:
-        confirm = input("Continue? (y/n): ")
-        if confirm.lower() != "y":
-            print("Aborted.")
-            return
+        # Check if stdin is a TTY (interactive). If not (e.g., piped),
+        # require --yes to proceed.
+        import sys
+        if sys.stdin.isatty():
+            confirm = input("Continue? (y/n): ")
+            if confirm.lower() != "y":
+                print("Aborted.")
+                return
+        else:
+            if not args.yes:
+                print("Non-interactive mode detected. Use --yes to confirm, or pipe 'y' on stdin.")
+                return
 
     success = 0
     failed = 0
