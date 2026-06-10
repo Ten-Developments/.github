@@ -3,8 +3,8 @@
 # This workflow is the SINGLE SOURCE OF TRUTH for the Ten-Developments
 # branch freeze policy (task TEN-TR01_00001).
 #
-# Rules:
-#   - Block merges on Saturday and Sunday
+# Rules (configurable via inputs):
+#   - Block merges on weekends (Friday/Saturday/Sunday) — Friday included
 #   - Block merges on US federal holidays:
 #       * New Year's Day (Jan 1)
 #       * Independence Day (Jul 4)
@@ -14,6 +14,15 @@
 #       * Christmas Eve (Dec 24)
 #       * Christmas (Dec 25)
 #       * New Year's Eve (Dec 31)
+#   - Block merges on Mexican federal holidays:
+#       * New Year's Day (Jan 1)
+#       * Constitution Day (first Monday in February)
+#       * Benito Juárez Day (third Monday in March)
+#       * Labor Day (May 1)
+#       * Independence Day (Sep 16)
+#       * Revolution Day (third Monday in November)
+#       * Christmas (Dec 25)
+#   - Block merges on custom dates (per-repo or org-defined)
 #
 # The job name `freeze-check` is critical — the Org Ruleset references it
 # exactly. Renaming it will silently disable enforcement.
@@ -28,6 +37,21 @@ on:
         required: false
         type: string
         default: "America/Los_Angeles"
+      friday_is_weekend:
+        description: "Treat Friday as a weekend day (block merges on Friday too)"
+        required: false
+        type: boolean
+        default: true
+      holiday_calendars:
+        description: "Comma-separated list of holiday calendars to enforce. Options: us_federal, mexico_federal"
+        required: false
+        type: string
+        default: "us_federal,mexico_federal"
+      custom_dates:
+        description: "Comma-separated list of additional freeze dates in YYYY-MM-DD format (e.g. '2026-07-15,2026-08-20')"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   freeze-check:
@@ -39,6 +63,10 @@ jobs:
           set -eu
 
           TZ_INPUT="${{ inputs.timezone }}"
+          FRIDAY_IS_WEEKEND="${{ inputs.friday_is_weekend }}"
+          CALENDARS_INPUT="${{ inputs.holiday_calendars }}"
+          CUSTOM_DATES_INPUT="${{ inputs.custom_dates }}"
+
           DAY=$(TZ="$TZ_INPUT" date +%u)        # 1=Mon, 7=Sun
           DATE=$(TZ="$TZ_INPUT" date +%Y-%m-%d)
           YEAR=$(TZ="$TZ_INPUT" date +%Y)
@@ -46,62 +74,147 @@ jobs:
           DAY_OF_MONTH=$(TZ="$TZ_INPUT" date +%-d)
 
           echo "Today is $DATE (day-of-week: $DAY) in timezone $TZ_INPUT"
+          echo "Friday is weekend: $FRIDAY_IS_WEEKEND"
+          echo "Holiday calendars: $CALENDARS_INPUT"
+          echo "Custom dates: ${CUSTOM_DATES_INPUT:-<none>}"
 
           # ----------------------------------------------------------------
-          # Rule 1: Block on weekends
+          # Rule 1: Block on weekends (Friday/Saturday/Sunday)
           # ----------------------------------------------------------------
-          if [ "$DAY" -ge 6 ]; then
-            echo "Freeze: merges are blocked on weekends ($DATE)."
+          if [ "$FRIDAY_IS_WEEKEND" = "true" ]; then
+            WEEKEND_THRESHOLD=5   # Friday (5) is the first weekend day
+          else
+            WEEKEND_THRESHOLD=6   # Saturday (6) is the first weekend day
+          fi
+
+          if [ "$DAY" -ge "$WEEKEND_THRESHOLD" ]; then
+            DOW_NAME=$(TZ="$TZ_INPUT" date +%A)
+            echo "Freeze: merges are blocked on $DOW_NAME ($DATE)."
             exit 1
           fi
 
           # ----------------------------------------------------------------
-          # Rule 2: Block on US federal holidays (auto-calculated)
+          # Rule 2: Block on holidays (US federal and/or Mexican federal)
           # ----------------------------------------------------------------
           FROZEN=0
+          FROZEN_REASON=""
 
-          # Fixed-date holidays
-          case "$DATE" in
-            "${YEAR}-01-01") echo "Holiday: New Year's Day";            FROZEN=1 ;;
-            "${YEAR}-07-04") echo "Holiday: Independence Day";         FROZEN=1 ;;
-            "${YEAR}-12-24") echo "Holiday: Christmas Eve";            FROZEN=1 ;;
-            "${YEAR}-12-25") echo "Holiday: Christmas";                FROZEN=1 ;;
-            "${YEAR}-12-31") echo "Holiday: New Year's Eve";           FROZEN=1 ;;
-          esac
+          # Check if today matches a fixed-date holiday in any active calendar
+          check_fixed_holiday() {
+            local mm_dd="$1"
+            local name="$2"
+            case "$DATE" in
+              "${YEAR}-${mm_dd}")
+                FROZEN=1
+                FROZEN_REASON="$name"
+                ;;
+            esac
+          }
 
-          # Floating-date holidays (nth weekday of month)
+          # US federal holidays (fixed dates)
+          if echo "$CALENDARS_INPUT" | grep -q "us_federal"; then
+            check_fixed_holiday "01-01" "New Year's Day (US)"
+            check_fixed_holiday "07-04" "Independence Day (US)"
+            check_fixed_holiday "12-24" "Christmas Eve (US)"
+            check_fixed_holiday "12-25" "Christmas (US)"
+            check_fixed_holiday "12-31" "New Year's Eve (US)"
+          fi
 
-          # Labor Day = first Monday of September
-          if [ "$MONTH" -eq 9 ]; then
-            FIRST_DOW=$(TZ="$TZ_INPUT" date -d "${YEAR}-09-01" +%u)  # 1=Mon..7=Sun
-            # Days to add to Sep 1 to reach the first Monday
+          # Mexican federal holidays (fixed dates)
+          if echo "$CALENDARS_INPUT" | grep -q "mexico_federal"; then
+            check_fixed_holiday "01-01" "New Year's Day (Mexico)"
+            check_fixed_holiday "05-01" "Labor Day (Mexico)"
+            check_fixed_holiday "09-16" "Independence Day (Mexico)"
+            check_fixed_holiday "12-25" "Christmas (Mexico)"
+          fi
+
+          # ----------------------------------------------------------------
+          # Rule 3: Floating-date holidays (nth weekday of month)
+          # ----------------------------------------------------------------
+
+          # US Labor Day = first Monday of September
+          if [ "$FROZEN" -eq 0 ] && [ "$MONTH" -eq 9 ] && echo "$CALENDARS_INPUT" | grep -q "us_federal"; then
+            FIRST_DOW=$(TZ="$TZ_INPUT" date -d "${YEAR}-09-01" +%u)
             LABOR_DAY=$(( ((8 - FIRST_DOW) % 7) + 1 ))
             if [ "$DAY_OF_MONTH" -eq "$LABOR_DAY" ]; then
-              echo "Holiday: Labor Day (first Monday in September)"
               FROZEN=1
+              FROZEN_REASON="Labor Day (US, first Monday in September)"
             fi
           fi
 
-          # Thanksgiving = fourth Thursday in November
-          # Day-after-Thanksgiving = fourth Friday in November
-          if [ "$MONTH" -eq 11 ]; then
-            FIRST_DOW=$(TZ="$TZ_INPUT" date -d "${YEAR}-11-01" +%u)  # 1=Mon..7=Sun
-            # Days to add to Nov 1 to reach the first Thursday
+          # US Thanksgiving = fourth Thursday in November
+          # US Day-after-Thanksgiving = fourth Friday in November
+          # Note: if Friday is weekend, this is already blocked by Rule 1;
+          # this just provides the holiday name.
+          if [ "$FROZEN" -eq 0 ] && [ "$MONTH" -eq 11 ] && echo "$CALENDARS_INPUT" | grep -q "us_federal"; then
+            FIRST_DOW=$(TZ="$TZ_INPUT" date -d "${YEAR}-11-01" +%u)
             FIRST_THU=$(( ((11 - FIRST_DOW) % 7) + 1 ))
-            THANKSGIVING=$(( FIRST_THU + 21 ))   # fourth Thursday = first + 3 weeks
+            THANKSGIVING=$(( FIRST_THU + 21 ))
             DAY_AFTER=$(( THANKSGIVING + 1 ))
             if [ "$DAY_OF_MONTH" -eq "$THANKSGIVING" ]; then
-              echo "Holiday: Thanksgiving (fourth Thursday in November)"
               FROZEN=1
-            fi
-            if [ "$DAY_OF_MONTH" -eq "$DAY_AFTER" ]; then
-              echo "Holiday: Day after Thanksgiving"
+              FROZEN_REASON="Thanksgiving (US, fourth Thursday in November)"
+            elif [ "$DAY_OF_MONTH" -eq "$DAY_AFTER" ]; then
               FROZEN=1
+              FROZEN_REASON="Day after Thanksgiving (US)"
             fi
           fi
 
+          # Mexican Constitution Day = first Monday of February
+          if [ "$FROZEN" -eq 0 ] && [ "$MONTH" -eq 2 ] && echo "$CALENDARS_INPUT" | grep -q "mexico_federal"; then
+            FIRST_DOW=$(TZ="$TZ_INPUT" date -d "${YEAR}-02-01" +%u)
+            CONSTITUTION_DAY=$(( ((8 - FIRST_DOW) % 7) + 1 ))
+            if [ "$DAY_OF_MONTH" -eq "$CONSTITUTION_DAY" ]; then
+              FROZEN=1
+              FROZEN_REASON="Constitution Day (Mexico, first Monday in February)"
+            fi
+          fi
+
+          # Mexican Benito Juárez Day = third Monday of March
+          if [ "$FROZEN" -eq 0 ] && [ "$MONTH" -eq 3 ] && echo "$CALENDARS_INPUT" | grep -q "mexico_federal"; then
+            FIRST_DOW=$(TZ="$TZ_INPUT" date -d "${YEAR}-03-01" +%u)
+            FIRST_MON=$(( ((8 - FIRST_DOW) % 7) + 1 ))
+            BENITO_DAY=$(( FIRST_MON + 14 ))   # third Monday = first + 2 weeks
+            if [ "$DAY_OF_MONTH" -eq "$BENITO_DAY" ]; then
+              FROZEN=1
+              FROZEN_REASON="Benito Juárez Day (Mexico, third Monday in March)"
+            fi
+          fi
+
+          # Mexican Revolution Day = third Monday of November
+          if [ "$FROZEN" -eq 0 ] && [ "$MONTH" -eq 11 ] && echo "$CALENDARS_INPUT" | grep -q "mexico_federal"; then
+            FIRST_DOW=$(TZ="$TZ_INPUT" date -d "${YEAR}-11-01" +%u)
+            FIRST_MON=$(( ((8 - FIRST_DOW) % 7) + 1 ))
+            REVOLUTION_DAY=$(( FIRST_MON + 14 ))   # third Monday = first + 2 weeks
+            if [ "$DAY_OF_MONTH" -eq "$REVOLUTION_DAY" ]; then
+              FROZEN=1
+              FROZEN_REASON="Revolution Day (Mexico, third Monday in November)"
+            fi
+          fi
+
+          # ----------------------------------------------------------------
+          # Rule 4: Custom dates (per-repo or org-defined)
+          # ----------------------------------------------------------------
+          if [ "$FROZEN" -eq 0 ] && [ -n "$CUSTOM_DATES_INPUT" ]; then
+            # Iterate over comma-separated dates
+            IFS=','
+            for CUSTOM_DATE in $CUSTOM_DATES_INPUT; do
+              # Trim whitespace
+              CUSTOM_DATE=$(echo "$CUSTOM_DATE" | tr -d ' ')
+              if [ "$DATE" = "$CUSTOM_DATE" ]; then
+                FROZEN=1
+                FROZEN_REASON="Custom freeze date: $CUSTOM_DATE"
+                break
+              fi
+            done
+            unset IFS
+          fi
+
+          # ----------------------------------------------------------------
+          # Final decision
+          # ----------------------------------------------------------------
           if [ "$FROZEN" -eq 1 ]; then
-            echo "Freeze: merges are blocked on $DATE (scheduled holiday)."
+            echo "Freeze: merges are blocked on $DATE ($FROZEN_REASON)."
             exit 1
           fi
 

@@ -1,12 +1,18 @@
 name: Merge Freeze Check
 
-# This is the CALLER workflow. Copy this file to any consumer repo's
-# .github/workflows/merge-freeze.yml to enroll it in the org-level
-# branch freeze policy.
+# This is the CALLER workflow. It enrolls this repo in the org-level
+# branch freeze policy (task TEN-TR01_00001).
 #
 # The freeze logic itself lives in the reusable workflow:
 #   Ten-Developments/.github/.github/workflows/freeze-check.yml
 # This file just triggers the check on PR events and on a cron schedule.
+#
+# To customize the freeze policy for this specific repo, uncomment and
+# edit the `with:` block below to set custom inputs:
+#   - timezone: IANA timezone (default: America/Los_Angeles)
+#   - friday_is_weekend: treat Friday as weekend (default: true)
+#   - holiday_calendars: comma-separated list of calendars (default: us_federal,mexico_federal)
+#   - custom_dates: comma-separated YYYY-MM-DD dates for ad-hoc freezes
 
 on:
   pull_request:
@@ -22,3 +28,6 @@ jobs:
     uses: Ten-Developments/.github/.github/workflows/freeze-check.yml@main
     with:
       timezone: "America/Los_Angeles"
+      friday_is_weekend: true
+      holiday_calendars: "us_federal,mexico_federal"
+      # custom_dates: "2026-12-15,2027-01-05"   # example: freeze a specific date range
