@@ -1,0 +1,108 @@
+# Branch Freeze Check (reusable)
+#
+# This workflow is the SINGLE SOURCE OF TRUTH for the Ten-Developments
+# branch freeze policy (task TEN-TR01_00001).
+#
+# Rules:
+#   - Block merges on Saturday and Sunday
+#   - Block merges on US federal holidays:
+#       * New Year's Day (Jan 1)
+#       * Independence Day (Jul 4)
+#       * Labor Day (first Monday in September)
+#       * Thanksgiving (fourth Thursday in November)
+#       * Day after Thanksgiving (fourth Friday in November)
+#       * Christmas Eve (Dec 24)
+#       * Christmas (Dec 25)
+#       * New Year's Eve (Dec 31)
+#
+# The job name `freeze-check` is critical — the Org Ruleset references it
+# exactly. Renaming it will silently disable enforcement.
+
+name: Branch Freeze Check (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      timezone:
+        description: "IANA timezone for date evaluation"
+        required: false
+        type: string
+        default: "America/Los_Angeles"
+
+jobs:
+  freeze-check:
+    name: freeze-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check freeze window
+        run: |
+          set -eu
+
+          TZ_INPUT="${{ inputs.timezone }}"
+          DAY=$(TZ="$TZ_INPUT" date +%u)        # 1=Mon, 7=Sun
+          DATE=$(TZ="$TZ_INPUT" date +%Y-%m-%d)
+          YEAR=$(TZ="$TZ_INPUT" date +%Y)
+          MONTH=$(TZ="$TZ_INPUT" date +%-m)
+          DAY_OF_MONTH=$(TZ="$TZ_INPUT" date +%-d)
+
+          echo "Today is $DATE (day-of-week: $DAY) in timezone $TZ_INPUT"
+
+          # ----------------------------------------------------------------
+          # Rule 1: Block on weekends
+          # ----------------------------------------------------------------
+          if [ "$DAY" -ge 6 ]; then
+            echo "Freeze: merges are blocked on weekends ($DATE)."
+            exit 1
+          fi
+
+          # ----------------------------------------------------------------
+          # Rule 2: Block on US federal holidays (auto-calculated)
+          # ----------------------------------------------------------------
+          FROZEN=0
+
+          # Fixed-date holidays
+          case "$DATE" in
+            "${YEAR}-01-01") echo "Holiday: New Year's Day";            FROZEN=1 ;;
+            "${YEAR}-07-04") echo "Holiday: Independence Day";         FROZEN=1 ;;
+            "${YEAR}-12-24") echo "Holiday: Christmas Eve";            FROZEN=1 ;;
+            "${YEAR}-12-25") echo "Holiday: Christmas";                FROZEN=1 ;;
+            "${YEAR}-12-31") echo "Holiday: New Year's Eve";           FROZEN=1 ;;
+          esac
+
+          # Floating-date holidays (nth weekday of month)
+
+          # Labor Day = first Monday of September
+          if [ "$MONTH" -eq 9 ]; then
+            FIRST_DOW=$(TZ="$TZ_INPUT" date -d "${YEAR}-09-01" +%u)  # 1=Mon..7=Sun
+            # Days to add to Sep 1 to reach the first Monday
+            LABOR_DAY=$(( ((8 - FIRST_DOW) % 7) + 1 ))
+            if [ "$DAY_OF_MONTH" -eq "$LABOR_DAY" ]; then
+              echo "Holiday: Labor Day (first Monday in September)"
+              FROZEN=1
+            fi
+          fi
+
+          # Thanksgiving = fourth Thursday in November
+          # Day-after-Thanksgiving = fourth Friday in November
+          if [ "$MONTH" -eq 11 ]; then
+            FIRST_DOW=$(TZ="$TZ_INPUT" date -d "${YEAR}-11-01" +%u)  # 1=Mon..7=Sun
+            # Days to add to Nov 1 to reach the first Thursday
+            FIRST_THU=$(( ((11 - FIRST_DOW) % 7) + 1 ))
+            THANKSGIVING=$(( FIRST_THU + 21 ))   # fourth Thursday = first + 3 weeks
+            DAY_AFTER=$(( THANKSGIVING + 1 ))
+            if [ "$DAY_OF_MONTH" -eq "$THANKSGIVING" ]; then
+              echo "Holiday: Thanksgiving (fourth Thursday in November)"
+              FROZEN=1
+            fi
+            if [ "$DAY_OF_MONTH" -eq "$DAY_AFTER" ]; then
+              echo "Holiday: Day after Thanksgiving"
+              FROZEN=1
+            fi
+          fi
+
+          if [ "$FROZEN" -eq 1 ]; then
+            echo "Freeze: merges are blocked on $DATE (scheduled holiday)."
+            exit 1
+          fi
+
+          echo "No freeze active. Merge window is open ($DATE)."

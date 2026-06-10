@@ -1,0 +1,24 @@
+name: Merge Freeze Check
+
+# This is the CALLER workflow. Copy this file to any consumer repo's
+# .github/workflows/merge-freeze.yml to enroll it in the org-level
+# branch freeze policy.
+#
+# The freeze logic itself lives in the reusable workflow:
+#   Ten-Developments/.github/.github/workflows/freeze-check.yml
+# This file just triggers the check on PR events and on a cron schedule.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  schedule:
+    # Re-check open PRs every 30 minutes. The cron schedule is critical —
+    # without it, PRs opened before a freeze window begins won't get
+    # re-evaluated when the freeze starts.
+    - cron: "*/30 * * * *"
+
+jobs:
+  freeze:
+    uses: Ten-Developments/.github/.github/workflows/freeze-check.yml@main
+    with:
+      timezone: "America/Los_Angeles"
