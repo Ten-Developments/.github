@@ -67,8 +67,7 @@ workflow (which lives in `Ten-Developments/.github`) on every PR and every
 
 ## References
 
-- [Implementation plan](../../freeze_lock_enterprise/implementation.md)
-- [Task TEN-TR01_00001](../../freeze_lock_enterprise/Freeze%20lock%20enterpirse%20level%20to%20repos.pdf)
+- Task: **TEN-TR01_00001** — Branch freeze lock enterprise level to repos
 - [Org policy repo](https://github.com/Ten-Developments/.github)
 """
 

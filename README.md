@@ -125,8 +125,7 @@ Org admins can bypass the freeze for true emergencies:
 
 ## References
 
-- [Implementation plan](../../freeze_lock_enterprise/implementation.md) — full design and rollout details
-- [Task TEN-TR01_00001](../../freeze_lock_enterprise/Freeze%20lock%20enterpirse%20level%20to%20repos.pdf) — original requirements
+- Task: **TEN-TR01_00001** — Branch freeze lock enterprise level to repos
 - [GitHub: Reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows)
 - [GitHub: Org-level .github repository](https://docs.github.com/en/organizations/collaborating-with-groups-in-organizations/customizing-your-organizations-profile#adding-a-public-organization-profile-readme)
 - [GitHub: Rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)

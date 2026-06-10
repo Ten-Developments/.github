@@ -7,7 +7,8 @@ If you'd rather use the API, see `scripts/create_org_ruleset.py` in this repo.
 ## Prerequisites
 
 - You must be an **Organization Admin** or **Owner** of the `Ten-Developments` org
-- All consumer repos must already have the `merge-freeze.yml` caller workflow on their default branch (see [implementation.md](../../freeze_lock_enterprise/implementation.md))
+- All consumer repos must already have the `merge-freeze.yml` caller workflow on their default branch
+- Task: **TEN-TR01_00001** — Branch freeze lock enterprise level to repos
 
 ## Steps
 
@@ -123,4 +124,4 @@ To disable the freeze policy:
 
 - [GitHub Docs: Managing rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)
 - [GitHub Docs: Bypass policies for rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/using-bypass-policies-for-pull-request-approvals)
-- [Implementation plan](../../freeze_lock_enterprise/implementation.md)
+- Task: **TEN-TR01_00001** — Branch freeze lock enterprise level to repos
