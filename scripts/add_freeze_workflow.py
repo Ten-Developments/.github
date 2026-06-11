@@ -18,6 +18,11 @@ Usage:
     python add_freeze_workflow.py --pilot atlas-api --dry-run
 
 Requires: gh CLI authenticated, with repo+workflow scopes.
+
+Note: This script branches off the repo's DEFAULT branch (e.g. main or develop).
+If you need to retarget an existing PR to a different base branch, or if the
+branch was based off the wrong branch and accumulated unrelated changes, use
+scripts/recreate_freeze_branch.py to start fresh.
 """
 
 import argparse
