@@ -17,6 +17,8 @@ name: Merge Freeze Check
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
+    branches:
+      - main
   schedule:
     # Re-check open PRs every 30 minutes. The cron schedule is critical —
     # without it, PRs opened before a freeze window begins won't get
