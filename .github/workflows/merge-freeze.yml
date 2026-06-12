@@ -26,7 +26,20 @@ on:
     - cron: "0 */4 * * *"
 
 jobs:
+  # This job runs only on cron triggers. Its sole purpose is to give GitHub
+  # a visible job to report so the scheduler does not send "no jobs were run"
+  # notification emails. It does no real work — the actual freeze evaluation
+  # happens in the `freeze` job below on PR events.
+  cron-heartbeat:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Cron heartbeat — freeze policy is active."
+
+  # This job runs only on pull_request events and calls the reusable
+  # freeze-check workflow to evaluate and post the commit status.
   freeze:
+    if: github.event_name == 'pull_request'
     uses: Ten-Developments/.github/.github/workflows/freeze-check.yml@main
     with:
       timezone: "America/Los_Angeles"
