@@ -19,11 +19,11 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     branches:
       - main
-  schedule:
-    # Re-check open PRs every 4 hours. The cron schedule is critical —
-    # without it, PRs opened before a freeze window begins won't get
-    # re-evaluated when the freeze starts.
-    - cron: "0 */4 * * *"
+  #schedule:
+  #  # Re-check open PRs every 4 hours. The cron schedule is critical —
+  #  # without it, PRs opened before a freeze window begins won't get
+  #  # re-evaluated when the freeze starts.
+  #  - cron: "0 */4 * * *"
 
 jobs:
   freeze:
