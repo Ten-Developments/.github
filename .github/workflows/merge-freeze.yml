@@ -20,10 +20,10 @@ on:
     branches:
       - main
   schedule:
-    # Re-check open PRs every 30 minutes. The cron schedule is critical —
+    # Re-check open PRs every 4 hours. The cron schedule is critical —
     # without it, PRs opened before a freeze window begins won't get
     # re-evaluated when the freeze starts.
-    - cron: "*/30 * * * *"
+    - cron: "0 */4 * * *"
 
 jobs:
   freeze:
