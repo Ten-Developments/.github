@@ -57,8 +57,14 @@ jobs:
   freeze-check:
     name: freeze-check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write   # required to post commit statuses via the API
     steps:
       - name: Check freeze window
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -eu
 
@@ -89,15 +95,18 @@ jobs:
 
           if [ "$DAY" -ge "$WEEKEND_THRESHOLD" ]; then
             DOW_NAME=$(TZ="$TZ_INPUT" date +%A)
-            echo "Freeze: merges are blocked on $DOW_NAME ($DATE)."
-            exit 1
+            FROZEN=1
+            FROZEN_REASON="Merges are blocked on $DOW_NAME."
           fi
 
           # ----------------------------------------------------------------
           # Rule 2: Block on holidays (US federal and/or Mexican federal)
           # ----------------------------------------------------------------
-          FROZEN=0
-          FROZEN_REASON=""
+          # Note: FROZEN and FROZEN_REASON may already be set by Rule 1 above.
+          if [ -z "${FROZEN_REASON:-}" ]; then
+            FROZEN=0
+            FROZEN_REASON=""
+          fi
 
           # Check if today matches a fixed-date holiday in any active calendar
           check_fixed_holiday() {
@@ -211,11 +220,45 @@ jobs:
           fi
 
           # ----------------------------------------------------------------
-          # Final decision
+          # Final decision — post a commit status instead of failing the job.
+          #
+          # Why: exiting with a non-zero code marks the *job* as failed, which
+          # triggers GitHub's "workflow failed" notification emails. Instead we
+          # post a `failure` commit status directly to the API so the PR merge
+          # button stays blocked, but the job itself always exits cleanly (0)
+          # and no failure emails are sent.
+          #
+          # The status context "freeze-check" must match the name registered in
+          # the Org Ruleset as a required status check.
+          #
+          # On cron-triggered runs there is no PR SHA available, so we skip the
+          # API call — the cron run is just a heartbeat that stays green.
           # ----------------------------------------------------------------
           if [ "$FROZEN" -eq 1 ]; then
             echo "Freeze: merges are blocked on $DATE ($FROZEN_REASON)."
-            exit 1
+            STATUS_STATE="failure"
+            STATUS_DESC="❌ Branch frozen: $FROZEN_REASON"
+          else
+            echo "No freeze active. Merge window is open ($DATE)."
+            STATUS_STATE="success"
+            STATUS_DESC="✅ Merge window is open."
           fi
 
-          echo "No freeze active. Merge window is open ($DATE)."
+          if [ -n "${PR_SHA:-}" ]; then
+            echo "Posting commit status '$STATUS_STATE' to $PR_SHA"
+            curl -s -f -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/statuses/$PR_SHA" \
+              -d "{
+                \"state\": \"$STATUS_STATE\",
+                \"context\": \"freeze-check\",
+                \"description\": \"$STATUS_DESC\"
+              }"
+          else
+            # Cron run — no PR SHA, nothing to post. Job completes green.
+            echo "Cron run (no PR SHA). Skipping commit status post."
+          fi
+
+          # Always exit 0 — the job itself never fails, preventing email alerts.
+          exit 0
