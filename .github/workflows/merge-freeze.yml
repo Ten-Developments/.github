@@ -19,38 +19,21 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     branches:
       - main
-  #schedule:
-  #  # Re-check open PRs every 4 hours. The cron schedule is critical —
-  #  # without it, PRs opened before a freeze window begins won't get
-  #  # re-evaluated when the freeze starts.
-  #  - cron: "0 */4 * * *"
+  schedule:
+    - cron: "*/30 * * * *"
 
-# continue-on-error: true prevents GitHub from sending email
-# failure notifications when the freeze check blocks merges
-# on weekends/holidays. The status check `freeze / freeze-check`
-# still reports FAILURE, so the Org Ruleset still blocks merges.
-# Only the caller workflow's overall conclusion changes from
-# "failure" to "success" — stopping the notification flood.
+# The reusable workflow needs statuses:write to post commit statuses
+# via the GitHub API. This permission is inherited by the reusable workflow.
+
+permissions:
+  contents: read
+  statuses: write
 
 jobs:
-  # This job runs only on cron triggers. Its sole purpose is to give GitHub
-  # a visible job to report so the scheduler does not send "no jobs were run"
-  # notification emails. It does no real work — the actual freeze evaluation
-  # happens in the `freeze` job below on PR events.
-  #cron-heartbeat:
-  #  if: github.event_name == 'schedule'
-  #  runs-on: ubuntu-latest
-  #  steps:
-  #    - run: echo "Cron heartbeat — freeze policy is active."
-
-  # This job runs only on pull_request events and calls the reusable
-  # freeze-check workflow to evaluate and post the commit status.
   freeze:
-    if: github.event_name == 'pull_request'
     uses: Ten-Developments/.github/.github/workflows/freeze-check.yml@main
     with:
       timezone: "America/Los_Angeles"
       friday_is_weekend: true
       holiday_calendars: "us_federal,mexico_federal"
       # custom_dates: "2026-12-15,2027-01-05"   # example: freeze a specific date range
-    continue-on-error: true
