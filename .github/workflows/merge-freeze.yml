@@ -25,6 +25,13 @@ on:
   #  # re-evaluated when the freeze starts.
   #  - cron: "0 */4 * * *"
 
+# continue-on-error: true prevents GitHub from sending email
+# failure notifications when the freeze check blocks merges
+# on weekends/holidays. The status check `freeze / freeze-check`
+# still reports FAILURE, so the Org Ruleset still blocks merges.
+# Only the caller workflow's overall conclusion changes from
+# "failure" to "success" — stopping the notification flood.
+
 jobs:
   # This job runs only on cron triggers. Its sole purpose is to give GitHub
   # a visible job to report so the scheduler does not send "no jobs were run"
@@ -46,3 +53,4 @@ jobs:
       friday_is_weekend: true
       holiday_calendars: "us_federal,mexico_federal"
       # custom_dates: "2026-12-15,2027-01-05"   # example: freeze a specific date range
+    continue-on-error: true
