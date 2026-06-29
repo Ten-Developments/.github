@@ -19,8 +19,15 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     branches:
       - main
-  schedule:
-    - cron: "*/30 * * * *"
+  # NOTE: schedule trigger disabled 2026-06-29 due to GitHub Actions
+  # minutes quota exhaustion. The freeze is still enforced on every
+  # PR event (opened, reopened, synchronize, ready_for_review) and the
+  # Org Ruleset re-evaluates the freeze-check status when a merge is
+  # attempted, so merges are blocked during freeze windows even without
+  # the periodic cron re-evaluation.
+  # To re-enable: uncomment the schedule block below.
+  # schedule:
+  #   - cron: "*/30 * * * *"
 
 # The reusable workflow needs statuses:write to post commit statuses
 # via the GitHub API. This permission is inherited by the reusable workflow.
