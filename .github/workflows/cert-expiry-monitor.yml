@@ -1,0 +1,149 @@
+name: Certificate Expiry Monitor
+
+# Checks the TLS certificate on every public hostname this org serves and raises
+# an issue before one expires.
+#
+# WHY THIS EXISTS
+# On 2026-09-23 stage.marketing.tendev.ai started serving an expired certificate.
+# It was a hand-uploaded Let's Encrypt cert with a 90-day life and nothing
+# renewing it; the first anyone knew was a browser warning. Every certificate is
+# Google-managed and auto-renewing now, so that exact cause is gone — but
+# renewal can still fail quietly when DNS moves, a hostname is retired, or a
+# managed cert lands in PROVISIONING_FAILED. This is the check that notices.
+#
+# WHY IT TESTS FROM THE OUTSIDE RATHER THAN QUERYING GCP
+# Two reasons. It needs no credentials — the .github repo has no secrets and is
+# not in the Workload Identity binding, so a gcloud-based job would need a new
+# IAM binding before it could run at all. And it measures what a visitor's
+# browser actually gets, which is the thing that matters: it would also catch a
+# DNS change, a CDN misconfiguration, or a proxy serving the wrong certificate,
+# none of which are visible in GCP's certificate metadata.
+#
+# COST: one ubuntu runner, ~30 seconds, once a week. Deliberately modest — the
+# cron in merge-freeze.yml was disabled to save Actions minutes, so this stays
+# weekly rather than daily. Thirty days of warning is ample for a renewal.
+
+on:
+  schedule:
+    - cron: "0 15 * * 1"        # Mondays 15:00 UTC = 08:00 PT
+  workflow_dispatch:
+    inputs:
+      warn_days:
+        description: "Warn when a certificate expires within this many days"
+        required: false
+        default: "30"
+
+permissions:
+  contents: read
+  issues: write                 # to raise/update the alert issue
+
+jobs:
+  check:
+    name: check-certificates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check every hostname
+        id: check
+        env:
+          WARN_DAYS: ${{ github.event.inputs.warn_days || '30' }}
+          # Edit this list when a hostname is added or retired. Derived from the
+          # managed certificates in ten-hydrology-stage, plus www.tendev.ai,
+          # which is served by Cloudflare rather than this LB and so would
+          # otherwise be monitored by nobody.
+          HOSTS: >-
+            tendev.ai
+            www.tendev.ai
+            stage.tendev.ai
+            hydrology.tendev.ai
+            stage.hydrology.tendev.ai
+            stage.marketing.tendev.ai
+            services.tendev.ai
+            stage.services.tendev.ai
+            devremote.tendev.ai
+            stage-devremote.tendev.ai
+            hanstremmel.com
+            www.hanstremmel.com
+            stage.hanstremmel.com
+        run: |
+          set -uo pipefail
+          CRIT_DAYS=14
+          problems=""
+          printf '| Host | Days left | Expires | Issuer | Status |\n' >  summary.md
+          printf '| --- | ---: | --- | --- | --- |\n'                 >> summary.md
+
+          for h in $HOSTS; do
+            # -verify_return_error makes a bad chain fail here rather than
+            # silently returning a certificate a browser would reject.
+            cert=$(echo | timeout 20 openssl s_client -connect "$h:443" \
+                     -servername "$h" 2>/dev/null | openssl x509 -noout -enddate -issuer 2>/dev/null)
+
+            if [ -z "$cert" ]; then
+              # No TLS at all: DNS gone, host down, or handshake refused. This is
+              # a louder failure than an expiring certificate, not a quieter one.
+              printf '| `%s` | — | — | — | **UNREACHABLE** |\n' "$h" >> summary.md
+              problems="${problems}- \`${h}\` — TLS handshake failed (DNS, origin, or proxy problem)\n"
+              continue
+            fi
+
+            end=$(echo "$cert"    | sed -n 's/^notAfter=//p')
+            issuer=$(echo "$cert" | sed -n 's/.*CN *= *//p' | head -1)
+            end_ts=$(date -d "$end" +%s 2>/dev/null || echo 0)
+            now_ts=$(date +%s)
+            days=$(( (end_ts - now_ts) / 86400 ))
+
+            if   [ "$end_ts" -eq 0 ];        then state="**UNPARSEABLE**"; problems="${problems}- \`${h}\` — could not read expiry date\n"
+            elif [ "$days" -lt 0 ];          then state="**EXPIRED**";     problems="${problems}- \`${h}\` — EXPIRED ${days#-} days ago\n"
+            elif [ "$days" -lt "$CRIT_DAYS" ]; then state="**CRITICAL**";  problems="${problems}- \`${h}\` — expires in ${days} days\n"
+            elif [ "$days" -lt "$WARN_DAYS" ]; then state="WARN";          problems="${problems}- \`${h}\` — expires in ${days} days\n"
+            else state="ok"; fi
+
+            printf '| `%s` | %s | %s | %s | %s |\n' "$h" "$days" "$end" "${issuer:-?}" "$state" >> summary.md
+          done
+
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$problems" ]; then
+            {
+              echo "problems<<EOF"
+              printf '%b' "$problems"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Raise or update the alert issue
+        if: steps.check.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROBLEMS: ${{ steps.check.outputs.problems }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="TLS certificate attention needed"
+          # One long-lived issue that gets updated, rather than a new issue every
+          # week — the failure persists until someone acts, and duplicate issues
+          # get muted, which defeats the point.
+          NUM=$(gh issue list --state open --search "$TITLE in:title" --json number,title \
+                 --jq "[.[] | select(.title==\"$TITLE\")][0].number" 2>/dev/null)
+          BODY=$(printf 'Weekly certificate check found problems:\n\n%s\nFull table: %s\n\nThis issue is updated each week while the problem persists. Close it once resolved; it will reopen if the check fails again.' "$PROBLEMS" "$RUN_URL")
+
+          if [ -n "$NUM" ] && [ "$NUM" != "null" ]; then
+            gh issue comment "$NUM" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY"
+          fi
+
+      - name: Fail the run when a certificate is already expired or unreachable
+        if: steps.check.outputs.found == 'true'
+        run: |
+          # A warning alone should not fail the run — a 25-days-left certificate
+          # is information, not an incident, and a red X every week trains people
+          # to ignore it. Only the states that mean something is already broken
+          # or imminent turn the run red.
+          if printf '%b' "${{ steps.check.outputs.problems }}" | grep -qE "EXPIRED|handshake failed|expires in ([0-9]|1[0-3]) days"; then
+            echo "::error::A certificate is expired, unreachable, or expires within 14 days."
+            exit 1
+          fi
+          echo "::warning::A certificate is approaching expiry; issue raised."
