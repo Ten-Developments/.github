@@ -51,7 +51,34 @@ on:
         description: "Comma-separated list of additional freeze dates in YYYY-MM-DD format (e.g. '2026-07-15,2026-08-20')"
         required: false
         type: string
-        default: ""
+        # ORG-WIDE AD-HOC FREEZE — this default is the single place one can be
+        # declared. Every caller references this workflow `@main`, so a change
+        # here takes effect immediately in all 18 consumer repos, on every
+        # branch, with no per-repo PR and no promotion.
+        #
+        # ⚠ A caller that passes `custom_dates` explicitly OVERRIDES this and
+        # is NOT frozen by it. As of 2026-10-08 none do: TenPlatform and core
+        # both pinned a long-past "2026-08-26", and those overrides are removed
+        # in this same change so they inherit again. Re-check before relying on
+        # a date set here:
+        #   gh repo list Ten-Developments --limit 100 --json name --jq '.[].name' |
+        #   while read r; do gh api "repos/Ten-Developments/$r/contents/.github/workflows/merge-freeze.yml" \
+        #     --jq '.content' 2>/dev/null | base64 -d 2>/dev/null |
+        #     grep -qE '^[[:space:]]+custom_dates:' && echo "$r overrides"; done
+        #
+        # Only for dates no other rule catches — weekends (incl. Friday) and
+        # the us_federal / mexico_federal calendars are already handled above.
+        #
+        # Current entries:
+        #   2026-10-12 (Mon), 2026-10-13 (Tue) — requested freeze. Both are
+        #   weekdays; 10-12 is US Columbus Day, which is deliberately absent
+        #   from the us_federal list, so neither date is caught by any other
+        #   rule and both genuinely need to be here.
+        #
+        # Clear past dates when adding new ones. A stale date is harmless on
+        # its own, but it is exactly what let the 2026-08-26 overrides sit
+        # unnoticed in two repos for six weeks.
+        default: "2026-10-12,2026-10-13"
 
 jobs:
   freeze-check:
